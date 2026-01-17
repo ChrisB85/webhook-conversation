@@ -27,6 +27,7 @@ from homeassistant.util import language as language_util
 from .const import (
     CONF_AUTH_TYPE,
     CONF_ENABLE_STREAMING,
+    CONF_LOCAL_FALLBACK,
     CONF_NAME,
     CONF_OUTPUT_FIELD,
     CONF_PASSWORD,
@@ -40,6 +41,7 @@ from .const import (
     DEFAULT_AUTH_TYPE,
     DEFAULT_CONVERSATION_NAME,
     DEFAULT_ENABLE_STREAMING,
+    DEFAULT_LOCAL_FALLBACK,
     DEFAULT_OUTPUT_FIELD,
     DEFAULT_PROMPT,
     DEFAULT_STT_NAME,
@@ -143,6 +145,19 @@ def _get_subentry_schema(
                 ): bool,
             }
         )
+
+    if subentry_type == "conversation":
+        schema_dict[
+            vol.Optional(
+                CONF_LOCAL_FALLBACK,
+                description={
+                    "suggested_value": options.get(
+                        CONF_LOCAL_FALLBACK, DEFAULT_LOCAL_FALLBACK
+                    )
+                },
+                default=DEFAULT_LOCAL_FALLBACK,
+            )
+        ] = bool
     elif subentry_type in ("tts", "stt"):
         default_languages = options.get(
             CONF_SUPPORTED_LANGUAGES, DEFAULT_SUPPORTED_LANGUAGES

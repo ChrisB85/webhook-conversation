@@ -6,6 +6,7 @@ import logging
 from typing import Any, Literal
 
 from homeassistant.components import conversation
+from homeassistant.components.conversation import get_agent_manager
 from homeassistant.components.homeassistant.exposed_entities import async_should_expose
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import MATCH_ALL
@@ -15,10 +16,11 @@ from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
     entity_registry as er,
+    intent,
 )
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
+from .const import CONF_LOCAL_FALLBACK, DEFAULT_LOCAL_FALLBACK, DOMAIN
 from .entity import WebhookConversationLLMBaseEntity
 from .models import WebhookConversationPayload
 
@@ -54,6 +56,9 @@ class WebhookConversationEntity(
         """Initialize the agent."""
         super().__init__(config_entry, subentry)
         self._attr_supports_streaming = self._streaming_enabled
+        self._local_fallback: bool = subentry.data.get(
+            CONF_LOCAL_FALLBACK, DEFAULT_LOCAL_FALLBACK
+        )
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -76,6 +81,21 @@ class WebhookConversationEntity(
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
         """Process the user input and call the API."""
+        # Try to handle locally first if local fallback is enabled
+        if self._local_fallback:
+            intent_response = await self._try_local_intent(user_input, chat_log)
+            if intent_response is not None:
+                _LOGGER.debug("Intent handled locally: %s", intent_response.intent)
+                async for _ in chat_log.async_add_assistant_content(
+                    conversation.AssistantContent(
+                        self.entity_id,
+                        intent_response.speech.get("plain", {}).get("speech", ""),
+                    )
+                ):
+                    pass
+                return conversation.async_get_result_from_chat_log(user_input, chat_log)
+
+        # Fall back to webhook
         try:
             await chat_log.async_provide_llm_data(
                 user_input.as_llm_context(DOMAIN),
@@ -89,6 +109,34 @@ class WebhookConversationEntity(
         await self._async_handle_chat_log(user_input, chat_log)
 
         return conversation.async_get_result_from_chat_log(user_input, chat_log)
+
+    async def _try_local_intent(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: conversation.ChatLog,
+    ) -> intent.IntentResponse | None:
+        """Try to handle the user input with local intents.
+
+        Returns the intent response if handled locally, None otherwise.
+        """
+        agent_manager = get_agent_manager(self.hass)
+        default_agent = agent_manager.default_agent
+
+        if default_agent is None:
+            _LOGGER.debug("No default agent available for local intent handling")
+            return None
+
+        try:
+            intent_response = await default_agent.async_handle_intents(
+                user_input, chat_log
+            )
+            return intent_response
+        except Exception:
+            _LOGGER.debug(
+                "Failed to handle intent locally, falling back to webhook",
+                exc_info=True,
+            )
+            return None
 
     async def _async_handle_chat_log(
         self,

@@ -14,7 +14,11 @@
             "prompt": "System Prompt",
             "timeout": "Request timeout (seconds)",
             "enable_streaming": "Enable response streaming",
-            "auth_type": "Authentication type"
+            "auth_type": "Authentication type",
+            "local_fallback": "Local intent fallback"
+          },
+          "data_description": {
+            "local_fallback": "When enabled, try to handle commands locally (timers, device control) before sending to webhook."
           }
         },
         "auth": {
