@@ -141,28 +141,27 @@ class WebhookConversationEntity(
 
         _LOGGER.debug("Ignored intents: %s", self._local_fallback_ignore_intents)
 
-        # Only create intent_filter if there are intents to ignore
-        intent_filter = None
-        if self._local_fallback_ignore_intents:
-
-            def intent_filter(result: Any) -> bool:
-                """Filter out ignored intents."""
-                try:
-                    intent_name = result.intent.name
-                    if intent_name in self._local_fallback_ignore_intents:
-                        _LOGGER.debug(
-                            "Intent %s is in ignore list, skipping", intent_name
-                        )
-                        return False
-                except AttributeError:
-                    _LOGGER.debug("Could not get intent name from result: %s", result)
-                return True
-
         try:
             intent_response = await default_agent.async_handle_intents(
-                user_input, chat_log, intent_filter=intent_filter
+                user_input, chat_log
             )
             _LOGGER.debug("Local intent result: %s", intent_response)
+
+            # Check if the recognized intent is in the ignore list
+            if (
+                intent_response is not None
+                and self._local_fallback_ignore_intents
+                and intent_response.intent is not None
+            ):
+                intent_name = intent_response.intent.intent_type
+                _LOGGER.debug("Recognized intent: %s", intent_name)
+                if intent_name in self._local_fallback_ignore_intents:
+                    _LOGGER.debug(
+                        "Intent %s is in ignore list, skipping local handling",
+                        intent_name,
+                    )
+                    return None
+
             return intent_response
         except Exception:
             _LOGGER.exception(
