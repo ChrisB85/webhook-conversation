@@ -20,7 +20,13 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import CONF_LOCAL_FALLBACK, DEFAULT_LOCAL_FALLBACK, DOMAIN
+from .const import (
+    CONF_LOCAL_FALLBACK,
+    CONF_LOCAL_FALLBACK_IGNORE_INTENTS,
+    DEFAULT_LOCAL_FALLBACK,
+    DEFAULT_LOCAL_FALLBACK_IGNORE_INTENTS,
+    DOMAIN,
+)
 from .entity import WebhookConversationLLMBaseEntity
 from .models import WebhookConversationPayload
 
@@ -59,6 +65,9 @@ class WebhookConversationEntity(
         self._local_fallback: bool = subentry.data.get(
             CONF_LOCAL_FALLBACK, DEFAULT_LOCAL_FALLBACK
         )
+        self._local_fallback_ignore_intents: list[str] = subentry.data.get(
+            CONF_LOCAL_FALLBACK_IGNORE_INTENTS, DEFAULT_LOCAL_FALLBACK_IGNORE_INTENTS
+        )
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -82,8 +91,11 @@ class WebhookConversationEntity(
     ) -> conversation.ConversationResult:
         """Process the user input and call the API."""
         # Try to handle locally first if local fallback is enabled
+        _LOGGER.debug("Local fallback enabled: %s", self._local_fallback)
         if self._local_fallback:
+            _LOGGER.debug("Trying local intent for: %s", user_input.text)
             intent_response = await self._try_local_intent(user_input, chat_log)
+            _LOGGER.debug("Local intent response: %s", intent_response)
             if intent_response is not None:
                 _LOGGER.debug("Intent handled locally: %s", intent_response.intent)
                 async for _ in chat_log.async_add_assistant_content(
@@ -121,20 +133,40 @@ class WebhookConversationEntity(
         """
         agent_manager = get_agent_manager(self.hass)
         default_agent = agent_manager.default_agent
+        _LOGGER.debug("Default agent: %s (type: %s)", default_agent, type(default_agent))
 
         if default_agent is None:
             _LOGGER.debug("No default agent available for local intent handling")
             return None
 
+        _LOGGER.debug("Ignored intents: %s", self._local_fallback_ignore_intents)
+
+        # Only create intent_filter if there are intents to ignore
+        intent_filter = None
+        if self._local_fallback_ignore_intents:
+
+            def intent_filter(result: Any) -> bool:
+                """Filter out ignored intents."""
+                try:
+                    intent_name = result.intent.name
+                    if intent_name in self._local_fallback_ignore_intents:
+                        _LOGGER.debug(
+                            "Intent %s is in ignore list, skipping", intent_name
+                        )
+                        return False
+                except AttributeError:
+                    _LOGGER.debug("Could not get intent name from result: %s", result)
+                return True
+
         try:
             intent_response = await default_agent.async_handle_intents(
-                user_input, chat_log
+                user_input, chat_log, intent_filter=intent_filter
             )
+            _LOGGER.debug("Local intent result: %s", intent_response)
             return intent_response
         except Exception:
-            _LOGGER.debug(
-                "Failed to handle intent locally, falling back to webhook",
-                exc_info=True,
+            _LOGGER.exception(
+                "Failed to handle intent locally, falling back to webhook"
             )
             return None
 

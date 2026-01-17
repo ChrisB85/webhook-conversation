@@ -15,10 +15,12 @@
             "timeout": "Request timeout (seconds)",
             "enable_streaming": "Enable response streaming",
             "auth_type": "Authentication type",
-            "local_fallback": "Local intent fallback"
+            "local_fallback": "Local intent fallback",
+            "local_fallback_ignore_intents": "Ignored intents"
           },
           "data_description": {
-            "local_fallback": "When enabled, try to handle commands locally (timers, device control) before sending to webhook."
+            "local_fallback": "When enabled, try to handle commands locally (timers, device control) before sending to webhook.",
+            "local_fallback_ignore_intents": "Intent names to skip local handling (e.g., HassTurnOn, HassTurnOff). These will be sent to webhook instead."
           }
         },
         "auth": {
