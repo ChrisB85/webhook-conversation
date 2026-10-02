@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime, timedelta
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
@@ -17,6 +18,7 @@ from homeassistant.helpers import (
     entity_registry as er,
     llm,
 )
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import CONF_OUTPUT_FIELD, DEFAULT_OUTPUT_FIELD, DOMAIN
@@ -93,6 +95,42 @@ class WebhookConversationEntity(
 
         return conversation.async_get_result_from_chat_log(user_input, chat_log)
 
+    def _recent_local_turns(self, agent_id: str, minutes: int = 10, limit: int = 3) -> list[dict[str, Any]]:
+        """Tury obsłużone lokalnie w pipeline'ach tego agenta (wszystkie satelity), od najstarszej."""
+        data = self.hass.data.get("assist_pipeline")
+        if data is None:
+            return []
+        try:
+            od = dt_util.utcnow() - timedelta(minutes=minutes)
+            wynik: list[tuple[datetime, dict[str, Any]]] = []
+            for pipeline in data.pipeline_store.data.values():
+                if pipeline.conversation_engine != agent_id:
+                    continue
+                for run in data.pipeline_debug.get(pipeline.id, {}).values():
+                    ts = datetime.fromisoformat(run.timestamp)
+                    if ts < od:
+                        continue
+                    user = ""
+                    for event in run.events:
+                        ev = event.data or {}
+                        if str(event.type) == "intent-start":
+                            user = ev.get("intent_input") or ""
+                        elif str(event.type) == "intent-end" and ev.get("processed_locally") and user:
+                            resp = (ev.get("intent_output") or {}).get("response") or {}
+                            if resp.get("response_type") == "error":
+                                continue
+                            speech = ((resp.get("speech") or {}).get("plain") or {}).get("speech") or ""
+                            wynik.append((ts, {
+                                "user": user,
+                                "answer": speech,
+                                "seconds_ago": int((dt_util.utcnow() - ts).total_seconds()),
+                            }))
+            wynik.sort(key=lambda x: x[0])
+            return [w for _, w in wynik][-limit:]
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Failed to collect recent local turns")
+            return []
+
     async def _async_handle_chat_log(
         self,
         user_input: conversation.ConversationInput,
@@ -119,6 +157,7 @@ class WebhookConversationEntity(
         payload["query"] = user_messages[-1]["content"]
         payload["agent_id"] = user_input.agent_id
         payload["device_id"] = user_input.device_id
+        payload["recent_local"] = self._recent_local_turns(user_input.agent_id)
         payload["device_info"] = (
             (
                 device.dict_repr
