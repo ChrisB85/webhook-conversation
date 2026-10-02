@@ -165,8 +165,11 @@ class WebhookConversationLLMBaseEntity(WebhookConversationBaseEntity):
                             chunk_data = json.loads(line_str)
                             chunk_type = chunk_data.get("type")
                             if chunk_type == "error":
+                                # Local patch 2026-09-29: this text is spoken by TTS,
+                                # so keep it short; full chunk goes to the log.
+                                _LOGGER.warning("n8n streaming error: %s", chunk_data)
                                 raise HomeAssistantError(
-                                    f"n8n error: {chunk_data.get('message', chunk_data)}"
+                                    "Nie mogę teraz odpowiedzieć. Spróbuj za chwilę."
                                 )
                             # We don't break on "end" because n8n can send multiple
                             # begin/end blocks when using tools or intermediate steps.
